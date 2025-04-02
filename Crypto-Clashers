@@ -1,0 +1,546 @@
+"Crypto Clashers"
+
+import { useState, useEffect, useRef } from "react"
+import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Volume2, VolumeX, ArrowLeft } from 'lucide-react'
+import BoxingRing from "@/components/boxing-ring"
+import BattleLog from "@/components/battle-log"
+import ArenaEffects from "@/components/arena-effects"
+import { fetchCryptoData } from "@/lib/crypto-api"
+import type { CandlestickData } from "@/lib/types"
+import { marketMeleeFormula } from "@/lib/market-melee-formula"
+import Image from "next/image"
+
+interface MatchPageProps {
+  leftFighter: any
+  rightFighter: any
+  betAmount: number
+  betOn: string | null
+  onMatchComplete: (winner: string | null, betWon: boolean, winAmount?: number) => void
+}
+
+export default function MatchPage({
+  leftFighter,
+  rightFighter,
+  betAmount,
+  betOn,
+  onMatchComplete,
+}: MatchPageProps) {
+  const [fighterData, setFighterData] = useState<Record<string, CandlestickData[]>>({})
+  const [loading, setLoading] = useState(true)
+  const [gameSpeed, setGameSpeed] = useState(1) // 1x speed by default
+  const [battleLog, setBattleLog] = useState<string[]>([])
+  const [isMatchActive, setIsMatchActive] = useState(false)
+  const [matchRound, setMatchRound] = useState(1) // Start at Round 1 instead of 0
+  const [winner, setWinner] = useState<string | null>(null)
+  const [cameraAngle, setCameraAngle] = useState<"side" | "forward">("side")
+  const [soundEnabled, setSoundEnabled] = useState(true)
+  const [matchStarted, setMatchStarted] = useState(false)
+  
+  // Audio refs
+  const announcerRef = useRef<HTMLAudioElement | null>(null)
+  const bellRef = useRef<HTMLAudioElement | null>(null)
+  const crowdRef = useRef<HTMLAudioElement | null>(null)
+  const punchRef = useRef<HTMLAudioElement | null>(null)
+  const jabRef = useRef<HTMLAudioElement | null>(null)
+  const hookRef = useRef<HTMLAudioElement | null>(null)
+  const uppercutRef = useRef<HTMLAudioElement | null>(null)
+  const dodgeRef = useRef<HTMLAudioElement | null>(null)
+  const victoryRef = useRef<HTMLAudioElement | null>(null)
+  
+  // User controls
+  const [userControls, setUserControls] = useState({
+    leftPower: 0,
+    rightPower: 0,
+    leftCombo: 0,
+    rightCombo: 0,
+    leftLastMove: "",
+    rightLastMove: "",
+    leftSpecialCharged: false,
+    rightSpecialCharged: false,
+  })
+
+  // Initialize audio elements
+  useEffect(() => {
+    bellRef.current = new Audio("/sounds/bell.wav")
+    crowdRef.current = new Audio("/placeholder.svg?height=1&width=1") // Replace with actual audio file
+    punchRef.current = new Audio("/placeholder.svg?height=1&width=1") // Replace with actual audio file
+    jabRef.current = new Audio("/placeholder.svg?height=1&width=1") // Replace with actual audio file
+    hookRef.current = new Audio("/placeholder.svg?height=1&width=1") // Replace with actual audio file
+    uppercutRef.current = new Audio("/placeholder.svg?height=1&width=1") // Replace with actual audio file
+    dodgeRef.current = new Audio("/placeholder.svg?height=1&width=1") // Replace with actual audio file
+    victoryRef.current = new Audio("/placeholder.svg?height=1&width=1") // Replace with actual audio file
+    
+    // Loop crowd noise
+    if (crowdRef.current) {
+      crowdRef.current.loop = true
+      if (soundEnabled) {
+        crowdRef.current.play().catch(e => console.log("Audio play failed:", e))
+      }
+    }
+    
+    return () => {
+      // Clean up audio
+      if (crowdRef.current) {
+        crowdRef.current.pause()
+      }
+    }
+  }, [soundEnabled])
+
+  // Play sound effect based on action
+  const playSound = (action: string) => {
+    if (!soundEnabled) return
+    
+    switch (action) {
+      case "jab":
+        jabRef.current?.play().catch(e => console.log("Audio play failed:", e))
+        break
+      case "hook":
+        hookRef.current?.play().catch(e => console.log("Audio play failed:", e))
+        break
+      case "uppercut":
+        uppercutRef.current?.play().catch(e => console.log("Audio play failed:", e))
+        break
+      case "dodge":
+        dodgeRef.current?.play().catch(e => console.log("Audio play failed:", e))
+        break
+      case "bell":
+        bellRef.current?.play().catch(e => console.log("Audio play failed:", e))
+        break
+      case "victory":
+        victoryRef.current?.play().catch(e => console.log("Audio play failed:", e))
+        break
+      default:
+        punchRef.current?.play().catch(e => console.log("Audio play failed:", e))
+    }
+  }
+
+  // Toggle sound
+  const toggleSound = () => {
+    setSoundEnabled(!soundEnabled)
+    if (!soundEnabled) {
+      crowdRef.current?.play().catch(e => console.log("Audio play failed:", e))
+    } else {
+      crowdRef.current?.pause()
+    }
+  }
+
+  // Fetch data for fighters
+  useEffect(() => {
+    const fetchAllData = async () => {
+      setLoading(true)
+      try {
+        // Create an object to store all fighter data
+        const allData: Record<string, CandlestickData[]> = {}
+
+        // Fetch data for both fighters
+        const leftData = await fetchCryptoData(leftFighter.id)
+        const rightData = await fetchCryptoData(rightFighter.id)
+        
+        allData[leftFighter.id] = leftData
+        allData[rightFighter.id] = rightData
+
+        setFighterData(allData)
+      } catch (error) {
+        console.error("Error fetching crypto data:", error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchAllData()
+  }, [leftFighter.id, rightFighter.id])
+
+  // Get data for current fighters
+  const leftData = fighterData[leftFighter.id] || []
+  const rightData = fighterData[rightFighter.id] || []
+
+  // Calculate current market performance for both cryptocurrencies
+  const leftPerformance =
+    leftData.length > 0
+      ? calculatePerformance(leftData[leftData.length - 1], leftData.slice(0, -1), leftFighter.id)
+      : null
+
+  const rightPerformance =
+    rightData.length > 0
+      ? calculatePerformance(rightData[rightData.length - 1], rightData.slice(0, -1), rightFighter.id)
+      : null
+
+  // Determine boxing actions based on market data
+  const leftAction = leftPerformance?.action || "idle"
+  const rightAction = rightPerformance?.action || "idle"
+
+  // Start the match
+  const startMatch = () => {
+    if (isMatchActive) return
+    
+    setMatchStarted(true)
+    setIsMatchActive(true)
+    setMatchRound(1)
+    setWinner(null)
+    setBattleLog([
+      `<strong>🥊 New match starting: ${leftFighter.name} ${leftFighter.icon} vs ${rightFighter.name} ${rightFighter.icon}! 🥊</strong>`,
+    ])
+
+    // Play bell sound
+    playSound("bell")
+
+    if (betOn) {
+      setBattleLog((prev) => [
+        ...prev,
+        `<span class="text-yellow-400">💰 You bet ${betAmount} STYRD on ${betOn}! 💰</span>`,
+      ])
+    }
+  }
+
+  // Handle match simulation
+  useEffect(() => {
+    if (!leftPerformance || !rightPerformance || !isMatchActive) return
+
+    // Simulate a match with rounds
+    const interval = setInterval(() => {
+      if (matchRound < 5) {
+        // 5 rounds per match
+        // Update round
+        setMatchRound((prev) => prev + 1)
+
+        // Add round announcement to battle log
+        setBattleLog((prev) => [...prev, `<strong>🔔 Round ${matchRound + 1} begins!</strong>`])
+
+        // Play bell sound
+        playSound("bell")
+
+        // Add action logs
+        if (leftAction !== "idle") {
+          setBattleLog((prev) => [
+            ...prev,
+            `${leftFighter.icon} ${leftFighter.name} uses <strong>${leftAction}</strong>!`,
+          ])
+          
+          // Play sound for action
+          playSound(leftAction)
+        }
+
+        if (rightAction !== "idle") {
+          setBattleLog((prev) => [
+            ...prev,
+            `${rightFighter.icon} ${rightFighter.name} uses <strong>${rightAction}</strong>!`,
+          ])
+          
+          // Play sound for action
+          playSound(rightAction)
+        }
+
+        // Add market movement logs
+        if (leftPerformance.percentChange > 0) {
+          setBattleLog((prev) => [
+            ...prev,
+            `📈 ${leftFighter.name} price moved <span class="text-green-400">+${leftPerformance.percentChange.toFixed(2)}%</span>`,
+          ])
+        } else {
+          setBattleLog((prev) => [
+            ...prev,
+            `📉 ${leftFighter.name} price moved <span class="text-red-400">${leftPerformance.percentChange.toFixed(2)}%</span>`,
+          ])
+        }
+
+        if (rightPerformance.percentChange > 0) {
+          setBattleLog((prev) => [
+            ...prev,
+            `📈 ${rightFighter.name} price moved <span class="text-green-400">+${rightPerformance.percentChange.toFixed(2)}%</span>`,
+          ])
+        } else {
+          setBattleLog((prev) => [
+            ...prev,
+            `📉 ${rightFighter.name} price moved <span class="text-red-400">${rightPerformance.percentChange.toFixed(2)}%</span>`,
+          ])
+        }
+
+        // Check for Solana Fury Mode
+        if (rightFighter.id === "solana" && rightPerformance.isFuryMode) {
+          setBattleLog((prev) => [
+            ...prev,
+            `<span class="text-red-500">⚡⚡ ${rightFighter.name} ${rightFighter.icon} ENTERS FURY MODE! Price below $150! ⚡⚡</span>`,
+          ])
+        }
+
+        // Also check for left fighter
+        if (leftFighter.id === "solana" && leftPerformance.isFuryMode) {
+          setBattleLog((prev) => [
+            ...prev,
+            `<span class="text-red-500">⚡⚡ ${leftFighter.name} ${leftFighter.icon} ENTERS FURY MODE! Price below $150! ⚡⚡</span>`,
+          ])
+        }
+      } else {
+        // End the match
+        setIsMatchActive(false)
+
+        // Determine winner based on price change
+        const leftChange = leftPerformance.percentChange
+        const rightChange = rightPerformance.percentChange
+        let matchWinner: string | null = null
+        let betWon = false
+        let winAmount = 0
+
+        if (leftChange > rightChange) {
+          matchWinner = leftFighter.name
+          setWinner(leftFighter.name)
+          setBattleLog((prev) => [
+            ...prev,
+            `<strong>🏆 ${leftFighter.name} ${leftFighter.icon} WINS THE MATCH! 🏆</strong>`,
+          ])
+          
+          // Play victory sound
+          playSound("victory")
+
+          // Check if bet won
+          if (betOn === leftFighter.name) {
+            betWon = true
+            winAmount = betAmount * 2
+            setBattleLog((prev) => [
+              ...prev,
+              `<span class="text-green-400">💰 You won ${winAmount} STYRD tokens! 💰</span>`,
+            ])
+          } else if (betOn === rightFighter.name) {
+            setBattleLog((prev) => [
+              ...prev,
+              `<span class="text-red-400">❌ You lost your bet of ${betAmount} STYRD tokens.</span>`,
+            ])
+          }
+        } else if (rightChange > leftChange) {
+          matchWinner = rightFighter.name
+          setWinner(rightFighter.name)
+          setBattleLog((prev) => [
+            ...prev,
+            `<strong>🏆 ${rightFighter.name} ${rightFighter.icon} WINS THE MATCH! 🏆</strong>`,
+          ])
+          
+          // Play victory sound
+          playSound("victory")
+
+          // Check if bet won
+          if (betOn === rightFighter.name) {
+            betWon = true
+            winAmount = betAmount * 2
+            setBattleLog((prev) => [
+              ...prev,
+              `<span class="text-green-400">💰 You won ${winAmount} STYRD tokens! 💰</span>`,
+            ])
+          } else if (betOn === leftFighter.name) {
+            setBattleLog((prev) => [
+              ...prev,
+              `<span class="text-red-400">❌ You lost your bet of ${betAmount} STYRD tokens.</span>`,
+            ])
+          }
+        } else {
+          matchWinner = "DRAW"
+          setWinner("DRAW")
+          setBattleLog((prev) => [...prev, `<strong>⚖️ THE MATCH ENDS IN A DRAW! ⚖️</strong>`])
+
+          // Return bet amount if there's a draw
+          if (betOn) {
+            betWon = false
+            winAmount = betAmount // Return original bet
+            setBattleLog((prev) => [...prev, `Your bet of ${betAmount} STYRD tokens has been refunded.`])
+          }
+        }
+
+        // Reset user controls
+        setUserControls({
+          leftPower: 0,
+          rightPower: 0,
+          leftCombo: 0,
+          rightCombo: 0,
+          leftLastMove: "",
+          rightLastMove: "",
+          leftSpecialCharged: false,
+          rightSpecialCharged: false,
+        })
+        
+        // Notify parent component of match completion
+        setTimeout(() => {
+          onMatchComplete(matchWinner, betWon, winAmount)
+        }, 5000)
+      }
+    }, 3000 / gameSpeed) // Adjust timing based on game speed
+
+    return () => clearInterval(interval)
+  }, [
+    leftPerformance,
+    rightPerformance,
+    isMatchActive,
+    matchRound,
+    gameSpeed,
+    leftAction,
+    rightAction,
+    betOn,
+    betAmount,
+    leftFighter,
+    rightFighter,
+    onMatchComplete,
+  ])
+
+  // Handle user actions
+  const handleUserAction = (action: string, fighter: "left" | "right") => {
+    if (!isMatchActive) return
+
+    // Calculate damage based on move type
+    let baseDamage = 0
+    let comboMultiplier = 1
+    let moveDescription = ""
+
+    switch (action) {
+      case "jab":
+        baseDamage = 8 + Math.floor(Math.random() * 5) // 8-12 damage
+        moveDescription = "Quick Jab"
+        playSound("jab")
+        break
+      case "hook":
+        baseDamage = 12 + Math.floor(Math.random() * 7) // 12-18 damage
+        moveDescription = "Strong Hook"
+        playSound("hook")
+        break
+      case "uppercut":
+        baseDamage = 15 + Math.floor(Math.random() * 11) // 15-25 damage
+        moveDescription = "Powerful Uppercut"
+        playSound("uppercut")
+        break
+      case "dodge":
+        baseDamage = 0
+        moveDescription = "Defensive Dodge"
+        playSound("dodge")
+        break
+      default:
+        baseDamage = 5 + Math.floor(Math.random() * 6) // 5-10 damage
+        moveDescription = action
+        playSound("punch")
+    }
+
+    if (fighter === "left") {
+      // Check for combo
+      if (userControls.leftLastMove === action && action !== "dodge") {
+        const newCombo = userControls.leftCombo + 1
+        comboMultiplier = 1 + newCombo * 0.2 // 20% damage increase per combo
+
+        // Update controls
+        setUserControls((prev) => ({
+          ...prev,
+          leftPower: Math.min(100, prev.leftPower + baseDamage),
+          leftCombo: newCombo,
+          leftLastMove: action,
+          leftSpecialCharged: newCombo >= 3, // Special charged after 3 combos
+        }))
+
+        // Add combo message to battle log
+        if (newCombo > 1) {
+          setBattleLog((prev) => [
+            ...prev,
+            `<span class="text-yellow-400">🔥 ${newCombo}x COMBO! ${leftFighter.name}'s ${moveDescription} damage increased by ${Math.round((comboMultiplier - 1) * 100)}%!</span>`,
+          ])
+        }
+      } else {
+        // Reset combo
+        setUserControls((prev) => ({
+          ...prev,
+          leftPower: Math.min(100, prev.leftPower + baseDamage),
+          leftCombo: action !== "dodge" ? 1 : 0,
+          leftLastMove: action,
+        }))
+      }
+
+      // Add to battle log
+      setBattleLog((prev) => [
+        ...prev,
+        `<span class="text-blue-400">👊 You used ${moveDescription} with ${leftFighter.name}${userControls.leftCombo > 1 ? ` (${userControls.leftCombo}x combo)` : ""}!</span>`,
+      ])
+    } else {
+      // Check for combo
+      if (userControls.rightLastMove === action && action !== "dodge") {
+        const newCombo = userControls.rightCombo + 1
+        comboMultiplier = 1 + newCombo * 0.2 // 20% damage increase per combo
+
+        // Update controls
+        setUserControls((prev) => ({
+          ...prev,
+          rightPower: Math.min(100, prev.rightPower + baseDamage),
+          rightCombo: newCombo,
+          rightLastMove: action,
+          rightSpecialCharged: newCombo >= 3, // Special charged after 3 combos
+        }))
+
+        // Add combo message to battle log
+        if (newCombo > 1) {
+          setBattleLog((prev) => [
+            ...prev,
+            `<span class="text-yellow-400">🔥 ${newCombo}x COMBO! ${rightFighter.name}'s ${moveDescription} damage increased by ${Math.round((comboMultiplier - 1) * 100)}%!</span>`,
+          ])
+        }
+      } else {
+        // Reset combo
+        setUserControls((prev) => ({
+          ...prev,
+          rightPower: Math.min(100, prev.rightPower + baseDamage),
+          rightCombo: action !== "dodge" ? 1 : 0,
+          rightLastMove: action,
+        }))
+      }
+
+      // Add to battle log
+      setBattleLog((prev) => [
+        ...prev,
+        `<span class="text-purple-400">👊 You used ${moveDescription} with ${rightFighter.name}${userControls.rightCombo > 1 ? ` (${userControls.rightCombo}x combo)` : ""}!</span>`,
+      ])
+    }
+
+    // Special move charged notification
+    if (
+      (fighter === "left" && userControls.leftSpecialCharged) ||
+      (fighter === "right" && userControls.rightSpecialCharged)
+    ) {
+      setBattleLog((prev) => [
+        ...prev,
+        `<span class="text-green-400">⚡ SPECIAL MOVE CHARGED! Next uppercut will deal critical damage!</span>`,
+      ])
+    }
+  }
+
+  return (
+    <div className="flex flex-col min-h-screen">
+      <header className="border-b border-gray-800 p-4">
+        <div className="container mx-auto flex justify-between items-center">
+          <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-500 to-orange-500">
+            Crypto Clashers™ - Live Match
+          </h1>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-400">Game Speed:</span>
+              <select
+                value={gameSpeed}
+                onChange={(e) => setGameSpeed(Number(e.target.value))}
+                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm"
+              >
+                <option value={0.5}>0.5x</option>
+                <option value={1}>1x</option>
+                <option value={2}>2x</option>
+                <option value={3}>3x</option>
+              </select>
+            </div>
+
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={toggleSound}
+              className="bg-gray-800 border-gray-700 hover:bg-gray-700"
+            >
+              {soundEnabled ? (
+                <Volume2 className="h-4 w-4" />
+              ) : (
+                <VolumeX className="h-4 w-4" />
+              )}
+            </Button>
+
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={()
