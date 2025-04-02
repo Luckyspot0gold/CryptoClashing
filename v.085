@@ -1,0 +1,821 @@
+// Sound Management System
+class SoundManager {
+  constructor() {
+    this.sounds = {};
+    this.muted = false;
+  }
+
+  // Load all sound assets
+  async loadSounds() {
+    const soundAssets = {
+      'fight': '/sounds/fight.mp3',
+      'coin': '/sounds/coin.mp3',
+      'victory': '/sounds/victory.mp3',
+      'defeat': '/sounds/defeat.mp3',
+      'button': '/sounds/button.mp3',
+      'trade': '/sounds/trade.mp3'
+    };
+
+    for (const [name, path] of Object.entries(soundAssets)) {
+      try {
+        const audio = new Audio(path);
+        await new Promise((resolve, reject) => {
+          audio.addEventListener('canplaythrough', resolve, { once: true });
+          audio.addEventListener('error', reject, { once: true });
+          // Set timeout to avoid infinite loading
+          setTimeout(resolve, 3000);
+        });
+        this.sounds[name] = audio;
+        console.log(`Sound ${name} loaded successfully`);
+      } catch (error) {
+        console.error(`Failed to load sound ${name}:`, error);
+      }
+    }
+  }
+
+  // Play a sound
+  play(soundName) {
+    if (this.muted || !this.sounds[soundName]) return;
+    
+    // Clone the audio to allow overlapping sounds
+    const soundToPlay = this.sounds[soundName].cloneNode();
+    soundToPlay.volume = 0.7; // Default volume
+    soundToPlay.play().catch(err => console.error('Audio playback failed:', err));
+  }
+
+  // Toggle mute status
+  toggleMute() {
+    this.muted = !this.muted;
+    return this.muted;
+  }
+}
+
+// Market Data Service
+class MarketDataService {
+  constructor() {
+    this.baseUrl = 'https://api.binance.com/api/v3';
+    this.websocketUrl = 'wss://stream.binance.com:9443/ws';
+    this.socket = null;
+    this.activeSymbol = 'BTCUSDT';
+    this.candleData = [];
+    this.subscribers = {
+      'price': [],
+      'candles': [],
+      'ticker': []
+    };
+  }
+
+  // Initialize connection and data streams
+  init(symbol = 'BTCUSDT') {
+    this.activeSymbol = symbol;
+    this.connectWebSocket();
+    this.fetchHistoricalData();
+    
+    // Reconnect automatically if connection is lost
+    setInterval(() => {
+      if (this.socket && this.socket.readyState !== WebSocket.OPEN) {
+        console.log('Reconnecting websocket...');
+        this.connectWebSocket();
+      }
+    }, 30000);
+  }
+
+  // Connect to Binance WebSocket
+  connectWebSocket() {
+    if (this.socket) {
+      this.socket.close();
+    }
+
+    this.socket = new WebSocket(this.websocketUrl);
+    
+    this.socket.onopen = () => {
+      console.log('WebSocket connected');
+      
+      // Subscribe to ticker stream
+      this.socket.send(JSON.stringify({
+        method: 'SUBSCRIBE',
+        params: [
+          `${this.activeSymbol.toLowerCase()}@ticker`,
+          `${this.activeSymbol.toLowerCase()}@kline_1m`
+        ],
+        id: 1
+      }));
+    };
+    
+    this.socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      // Handle ticker data
+      if (data.e === '24hrTicker') {
+        const tickerData = {
+          symbol: data.s,
+          lastPrice: parseFloat(data.c),
+          priceChange: parseFloat(data.p),
+          priceChangePercent: parseFloat(data.P),
+          volume: parseFloat(data.v),
+          highPrice: parseFloat(data.h),
+          lowPrice: parseFloat(data.l),
+        };
+        
+        this.notifySubscribers('ticker', tickerData);
+        this.notifySubscribers('price', tickerData.lastPrice);
+      }
+      
+      // Handle candlestick data
+      if (data.e === 'kline') {
+        const candle = {
+          time: data.k.t,
+          open: parseFloat(data.k.o),
+          high: parseFloat(data.k.h),
+          low: parseFloat(data.k.l),
+          close: parseFloat(data.k.c),
+          volume: parseFloat(data.k.v),
+          isClosed: data.k.x
+        };
+        
+        if (candle.isClosed) {
+          this.candleData.push(candle);
+          // Keep last 100 candles
+          if (this.candleData.length > 100) {
+            this.candleData.shift();
+          }
+          this.calculateIndicators();
+          this.notifySubscribers('candles', this.candleData);
+        }
+      }
+    };
+    
+    this.socket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+    
+    this.socket.onclose = () => {
+      console.log('WebSocket connection closed');
+    };
+  }
+
+  // Fetch historical candlestick data
+  async fetchHistoricalData() {
+    try {
+      const response = await fetch(`${this.baseUrl}/klines?symbol=${this.activeSymbol}&interval=1m&limit=100`);
+      const data = await response.json();
+      
+      this.candleData = data.map(d => ({
+        time: d[0],
+        open: parseFloat(d[1]),
+        high: parseFloat(d[2]),
+        low: parseFloat(d[3]),
+        close: parseFloat(d[4]),
+        volume: parseFloat(d[5]),
+        isClosed: true
+      }));
+      
+      this.calculateIndicators();
+      this.notifySubscribers('candles', this.candleData);
+    } catch (error) {
+      console.error('Error fetching historical data:', error);
+    }
+  }
+
+  // Calculate technical indicators (MACD)
+  calculateIndicators() {
+    if (this.candleData.length < 26) return;
+    
+    // Calculate EMA-12 and EMA-26
+    const closePrices = this.candleData.map(candle => candle.close);
+    const ema12 = this.calculateEMA(closePrices, 12);
+    const ema26 = this.calculateEMA(closePrices, 26);
+    
+    // Calculate MACD line and signal line
+    const macdLine = ema12.map((value, index) => value - ema26[index]);
+    const signalLine = this.calculateEMA(macdLine, 9);
+    
+    // Calculate histogram
+    const histogram = macdLine.map((value, index) => value - signalLine[index]);
+    
+    // Attach indicators to candle data
+    this.candleData = this.candleData.map((candle, index) => ({
+      ...candle,
+      macd: macdLine[index],
+      signal: signalLine[index],
+      histogram: histogram[index]
+    }));
+  }
+
+  // Calculate Exponential Moving Average
+  calculateEMA(data, period) {
+    const k = 2 / (period + 1);
+    const emaData = [];
+    
+    // Initialize with SMA
+    let sum = 0;
+    for (let i = 0; i < period; i++) {
+      sum += data[i];
+    }
+    
+    emaData.push(sum / period);
+    
+    // Calculate EMA
+    for (let i = period; i < data.length; i++) {
+      emaData.push(data[i] * k + emaData[emaData.length - 1] * (1 - k));
+    }
+    
+    // Pad the beginning with undefined values
+    const result = new Array(period - 1).fill(undefined).concat(emaData);
+    return result;
+  }
+
+  // Subscribe to data updates
+  subscribe(type, callback) {
+    if (!this.subscribers[type]) {
+      this.subscribers[type] = [];
+    }
+    this.subscribers[type].push(callback);
+    
+    // Send initial data if available
+    if (type === 'candles' && this.candleData.length > 0) {
+      callback(this.candleData);
+    }
+  }
+
+  // Notify all subscribers of a specific type
+  notifySubscribers(type, data) {
+    if (this.subscribers[type]) {
+      this.subscribers[type].forEach(callback => callback(data));
+    }
+  }
+
+  // Change the active symbol
+  changeSymbol(symbol) {
+    this.activeSymbol = symbol;
+    this.candleData = [];
+    
+    // Reconnect websocket with new symbol
+    this.connectWebSocket();
+    this.fetchHistoricalData();
+  }
+
+  // Cleanup resources
+  cleanup() {
+    if (this.socket) {
+      this.socket.close();
+    }
+  }
+}
+
+// Chart Component for Fight Page
+class CryptoChart {
+  constructor(containerId) {
+    this.container = document.getElementById(containerId);
+    this.width = this.container.clientWidth;
+    this.height = this.container.clientHeight;
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = this.width;
+    this.canvas.height = this.height;
+    this.container.appendChild(this.canvas);
+    this.ctx = this.canvas.getContext('2d');
+    this.candleData = [];
+    this.padding = {
+      top: 20,
+      right: 50,
+      bottom: 30,
+      left: 60
+    };
+    this.chartArea = {
+      x: this.padding.left,
+      y: this.padding.top,
+      width: this.width - this.padding.left - this.padding.right,
+      height: (this.height - this.padding.top - this.padding.bottom) * 0.7
+    };
+    this.macdArea = {
+      x: this.padding.left,
+      y: this.chartArea.y + this.chartArea.height + 10,
+      width: this.chartArea.width,
+      height: (this.height - this.padding.top - this.padding.bottom) * 0.3 - 10
+    };
+    
+    // Add resize handler
+    window.addEventListener('resize', this.handleResize.bind(this));
+  }
+
+  // Handle container resize
+  handleResize() {
+    this.width = this.container.clientWidth;
+    this.height = this.container.clientHeight;
+    this.canvas.width = this.width;
+    this.canvas.height = this.height;
+    
+    this.chartArea = {
+      x: this.padding.left,
+      y: this.padding.top,
+      width: this.width - this.padding.left - this.padding.right,
+      height: (this.height - this.padding.top - this.padding.bottom) * 0.7
+    };
+    this.macdArea = {
+      x: this.padding.left,
+      y: this.chartArea.y + this.chartArea.height + 10,
+      width: this.chartArea.width,
+      height: (this.height - this.padding.top - this.padding.bottom) * 0.3 - 10
+    };
+    
+    this.render();
+  }
+
+  // Update chart with new data
+  updateData(candleData) {
+    this.candleData = candleData;
+    this.render();
+  }
+
+  // Render the chart
+  render() {
+    if (!this.candleData || this.candleData.length === 0) return;
+    
+    // Clear canvas
+    this.ctx.clearRect(0, 0, this.width, this.height);
+    
+    // Get visible data (last 30 candles)
+    const visibleData = this.candleData.slice(-30);
+    
+    // Calculate min and max values for scaling
+    const minPrice = Math.min(...visibleData.map(candle => candle.low));
+    const maxPrice = Math.max(...visibleData.map(candle => candle.high));
+    const pricePadding = (maxPrice - minPrice) * 0.1;
+    
+    // Calculate MACD min/max
+    const macdValues = visibleData
+      .filter(candle => candle.macd !== undefined)
+      .flatMap(candle => [candle.macd, candle.signal, candle.histogram]);
+    
+    const minMacd = Math.min(...macdValues);
+    const maxMacd = Math.max(...macdValues);
+    const macdPadding = (maxMacd - minMacd) * 0.1;
+    
+    // Draw price axis
+    this.drawYAxis(minPrice - pricePadding, maxPrice + pricePadding);
+    
+    // Draw time axis
+    this.drawXAxis(visibleData);
+    
+    // Draw candlesticks
+    this.drawCandlesticks(visibleData, minPrice - pricePadding, maxPrice + pricePadding);
+    
+    // Draw MACD
+    if (visibleData[0].macd !== undefined) {
+      this.drawMacd(visibleData, minMacd - macdPadding, maxMacd + macdPadding);
+    }
+  }
+
+  // Draw Y-axis (price)
+  drawYAxis(min, max) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = '#555';
+    ctx.fillStyle = '#555';
+    ctx.font = '10px Arial';
+    ctx.textAlign = 'right';
+    
+    // Draw axis line
+    ctx.beginPath();
+    ctx.moveTo(this.padding.left, this.padding.top);
+    ctx.lineTo(this.padding.left, this.chartArea.y + this.chartArea.height);
+    ctx.stroke();
+    
+    // Draw price labels
+    const step = (max - min) / 5;
+    for (let i = 0; i <= 5; i++) {
+      const price = max - step * i;
+      const y = this.mapPriceToY(price, min, max);
+      
+      ctx.beginPath();
+      ctx.moveTo(this.padding.left - 5, y);
+      ctx.lineTo(this.padding.left, y);
+      ctx.stroke();
+      
+      ctx.fillText(price.toFixed(2), this.padding.left - 8, y + 4);
+      
+      // Draw grid line
+      ctx.beginPath();
+      ctx.strokeStyle = '#eee';
+      ctx.moveTo(this.padding.left, y);
+      ctx.lineTo(this.padding.left + this.chartArea.width, y);
+      ctx.stroke();
+      ctx.strokeStyle = '#555';
+    }
+    
+    // Draw MACD axis
+    ctx.beginPath();
+    ctx.moveTo(this.padding.left, this.macdArea.y);
+    ctx.lineTo(this.padding.left, this.macdArea.y + this.macdArea.height);
+    ctx.stroke();
+    
+    ctx.restore();
+  }
+
+  // Draw X-axis (time)
+  drawXAxis(data) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = '#555';
+    ctx.fillStyle = '#555';
+    ctx.font = '10px Arial';
+    ctx.textAlign = 'center';
+    
+    // Draw axis line
+    ctx.beginPath();
+    ctx.moveTo(this.chartArea.x, this.chartArea.y + this.chartArea.height);
+    ctx.lineTo(this.chartArea.x + this.chartArea.width, this.chartArea.y + this.chartArea.height);
+    ctx.stroke();
+    
+    ctx.beginPath();
+    ctx.moveTo(this.macdArea.x, this.macdArea.y + this.macdArea.height);
+    ctx.lineTo(this.macdArea.x + this.macdArea.width, this.macdArea.y + this.macdArea.height);
+    ctx.stroke();
+    
+    // Draw time labels
+    const step = Math.ceil(data.length / 5);
+    for (let i = 0; i < data.length; i += step) {
+      const candle = data[i];
+      const x = this.mapIndexToX(i, data.length);
+      
+      ctx.beginPath();
+      ctx.moveTo(x, this.chartArea.y + this.chartArea.height);
+      ctx.lineTo(x, this.chartArea.y + this.chartArea.height + 5);
+      ctx.stroke();
+      
+      const date = new Date(candle.time);
+      const timeLabel = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
+      ctx.fillText(timeLabel, x, this.chartArea.y + this.chartArea.height + 15);
+      
+      // Draw grid line
+      ctx.beginPath();
+      ctx.strokeStyle = '#eee';
+      ctx.moveTo(x, this.chartArea.y);
+      ctx.lineTo(x, this.chartArea.y + this.chartArea.height);
+      ctx.stroke();
+      ctx.strokeStyle = '#555';
+    }
+    
+    ctx.restore();
+  }
+
+  // Draw candlesticks
+  drawCandlesticks(data, min, max) {
+    const ctx = this.ctx;
+    const candleWidth = this.chartArea.width / data.length * 0.8;
+    
+    ctx.save();
+    
+    data.forEach((candle, i) => {
+      const x = this.mapIndexToX(i, data.length);
+      const yOpen = this.mapPriceToY(candle.open, min, max);
+      const yClose = this.mapPriceToY(candle.close, min, max);
+      const yHigh = this.mapPriceToY(candle.high, min, max);
+      const yLow = this.mapPriceToY(candle.low, min, max);
+      
+      // Determine candle color
+      const isGreen = candle.close >= candle.open;
+      ctx.fillStyle = isGreen ? '#26a69a' : '#ef5350';
+      ctx.strokeStyle = isGreen ? '#26a69a' : '#ef5350';
+      
+      // Draw wick
+      ctx.beginPath();
+      ctx.moveTo(x, yHigh);
+      ctx.lineTo(x, yLow);
+      ctx.stroke();
+      
+      // Draw body
+      const bodyHeight = Math.max(Math.abs(yClose - yOpen), 1);
+      const bodyY = isGreen ? yClose : yOpen;
+      ctx.fillRect(x - candleWidth / 2, bodyY, candleWidth, bodyHeight);
+    });
+    
+    ctx.restore();
+  }
+
+  // Draw MACD indicator
+  drawMacd(data, min, max) {
+    const ctx = this.ctx;
+    ctx.save();
+    
+    // Draw zero line
+    const zeroY = this.mapMacdToY(0, min, max);
+    ctx.beginPath();
+    ctx.strokeStyle = '#999';
+    ctx.setLineDash([2, 2]);
+    ctx.moveTo(this.macdArea.x, zeroY);
+    ctx.lineTo(this.macdArea.x + this.macdArea.width, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    
+    // Draw MACD line
+    ctx.beginPath();
+    ctx.strokeStyle = '#2196F3';
+    ctx.lineWidth = 1.5;
+    
+    data.forEach((candle, i) => {
+      if (candle.macd === undefined) return;
+      
+      const x = this.mapIndexToX(i, data.length);
+      const y = this.mapMacdToY(candle.macd, min, max);
+      
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    
+    ctx.stroke();
+    
+    // Draw Signal line
+    ctx.beginPath();
+    ctx.strokeStyle = '#FF9800';
+    ctx.lineWidth = 1.5;
+    
+    data.forEach((candle, i) => {
+      if (candle.signal === undefined) return;
+      
+      const x = this.mapIndexToX(i, data.length);
+      const y = this.mapMacdToY(candle.signal, min, max);
+      
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    
+    ctx.stroke();
+    
+    // Draw histogram
+    const barWidth = this.chartArea.width / data.length * 0.6;
+    
+    data.forEach((candle, i) => {
+      if (candle.histogram === undefined) return;
+      
+      const x = this.mapIndexToX(i, data.length);
+      const y = this.mapMacdToY(0, min, max);
+      const barHeight = Math.abs(this.mapMacdToY(candle.histogram, min, max) - y);
+      const isPositive = candle.histogram >= 0;
+      
+      ctx.fillStyle = isPositive ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)';
+      
+      ctx.fillRect(
+        x - barWidth / 2,
+        isPositive ? y - barHeight : y,
+        barWidth,
+        barHeight
+      );
+    });
+    
+    // Draw MACD label
+    ctx.fillStyle = '#555';
+    ctx.font = '10px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText('MACD (12, 26, 9)', this.macdArea.x, this.macdArea.y + 10);
+    
+    ctx.restore();
+  }
+
+  // Map price value to y-coordinate
+  mapPriceToY(price, min, max) {
+    return this.chartArea.y + this.chartArea.height - 
+      (price - min) / (max - min) * this.chartArea.height;
+  }
+
+  // Map MACD value to y-coordinate
+  mapMacdToY(value, min, max) {
+    return this.macdArea.y + this.macdArea.height - 
+      (value - min) / (max - min) * this.macdArea.height;
+  }
+
+  // Map index to x-coordinate
+  mapIndexToX(index, total) {
+    return this.chartArea.x + (index + 0.5) * (this.chartArea.width / total);
+  }
+
+  // Cleanup resources
+  cleanup() {
+    window.removeEventListener('resize', this.handleResize.bind(this));
+    this.container.removeChild(this.canvas);
+  }
+}
+
+// 3D Forward View Camera for Fight Page
+class ForwardViewCamera {
+  constructor(containerId) {
+    this.container = document.getElementById(containerId);
+    this.width = this.container.clientWidth;
+    this.height = this.container.clientHeight;
+    
+    // Initialize Three.js renderer
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    this.renderer.setSize(this.width, this.height);
+    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.container.appendChild(this.renderer.domElement);
+    
+    // Create scene
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x121212);
+    
+    // Create camera
+    this.camera = new THREE.PerspectiveCamera(75, this.width / this.height, 0.1, 1000);
+    this.camera.position.z = 10;
+    
+    // Create lights
+    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    this.scene.add(this.ambientLight);
+    
+    this.directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    this.directionalLight.position.set(5, 5, 5);
+    this.scene.add(this.directionalLight);
+    
+    // Create crypto coins
+    this.createCoins();
+    
+    // Add resize handler
+    window.addEventListener('resize', this.handleResize.bind(this));
+    
+    // Start animation loop
+    this.animate();
+  }
+
+  // Create 3D crypto coin models
+  createCoins() {
+    this.coins = {};
+    const cryptos = ['BTC', 'ETH', 'BNB', 'ADA', 'XRP'];
+    const coinColors = {
+      'BTC': 0xF7931A,
+      'ETH': 0x627EEA,
+      'BNB': 0xF3BA2F,
+      'ADA': 0x0033AD,
+      'XRP': 0x23292F
+    };
+    
+    // Create coin geometry and materials
+    const geometry = new THREE.CylinderGeometry(2, 2, 0.3, 32);
+    
+    cryptos.forEach((crypto, index) => {
+      // Create coin material with logo texture
+      const material = new THREE.MeshPhongMaterial({
+        color: coinColors[crypto],
+        shininess: 100,
+        emissive: 0x111111
+      });
+      
+      // Create coin mesh
+      const coin = new THREE.Mesh(geometry, material);
+      
+      // Position coins in different parts of the scene
+      coin.position.x = (index - 2) * 5;
+      coin.position.y = Math.sin(index) * 2;
+      coin.position.z = Math.cos(index) * 2 - 5;
+      
+      // Rotate to face camera
+      coin.rotation.x = Math.PI / 2;
+      
+      this.scene.add(coin);
+      this.coins[crypto] = coin;
+      
+      // Add coin symbol text
+      const fontLoader = new THREE.FontLoader();
+      fontLoader.load('/fonts/helvetiker_regular.typeface.json', (font) => {
+        const textGeometry = new THREE.TextGeometry(crypto, {
+          font: font,
+          size: 0.5,
+          height: 0.1
+        });
+        textGeometry.center();
+        
+        const textMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff });
+        const text = new THREE.Mesh(textGeometry, textMaterial);
+        
+        text.position.copy(coin.position);
+        text.position.y += 0.25;
+        
+        // Rotate to face camera
+        text.rotation.x = Math.PI / 2;
+        
+        this.scene.add(text);
+      });
+    });
+    
+    // Add particle effects
+    this.createParticles();
+  }
+
+  // Create particle effects
+  createParticles() {
+    const particleCount = 1000;
+    const particles = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    
+    for (let i = 0; i < particleCount * 3; i += 3) {
+      positions[i] = (Math.random() - 0.5) * 50;
+      positions[i + 1] = (Math.random() - 0.5) * 50;
+      positions[i + 2] = (Math.random() - 0.5) * 50;
+    }
+    
+    particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    
+    const particleMaterial = new THREE.PointsMaterial({
+      color: 0x88ccff,
+      size: 0.1,
+      transparent: true,
+      opacity: 0.8
+    });
+    
+    this.particleSystem = new THREE.Points(particles, particleMaterial);
+    this.scene.add(this.particleSystem);
+  }
+
+  // Handle window resize
+  handleResize() {
+    this.width = this.container.clientWidth;
+    this.height = this.container.clientHeight;
+    
+    this.camera.aspect = this.width / this.height;
+    this.camera.updateProjectionMatrix();
+    
+    this.renderer.setSize(this.width, this.height);
+  }
+
+  // Animation loop
+  animate() {
+    requestAnimationFrame(this.animate.bind(this));
+    
+    // Rotate coins
+    Object.values(this.coins).forEach(coin => {
+      coin.rotation.z += 0.01;
+    });
+    
+    // Rotate particle system
+    if (this.particleSystem) {
+      this.particleSystem.rotation.y += 0.0003;
+    }
+    
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  // Update coin positions based on price data
+  updateCoins(marketData) {
+    Object.entries(marketData).forEach(([symbol, data]) => {
+      const coin = this.coins[symbol];
+      if (!coin) return;
+      
+      // Calculate vertical position based on price change
+      const priceChangePercent = data.priceChangePercent;
+      const newY = Math.max(-5, Math.min(5, priceChangePercent / 2));
+      
+      // Animate position change
+      gsap.to(coin.position, {
+        y: newY,
+        duration: 1,
+        ease: 'power2.out'
+      });
+      
+      // Change color intensity based on volume
+      const volumeIntensity = Math.min(1, data.volume / 10000000);
+      gsap.to(coin.material, {
+        emissiveIntensity: volumeIntensity,
+        duration: 1
+      });
+    });
+  }
+
+  // Cleanup resources
+  cleanup() {
+    window.removeEventListener('resize', this.handleResize.bind(this));
+    this.container.removeChild(this.renderer.domElement);
+    
+    // Dispose geometries and materials
+    Object.values(this.coins).forEach(coin => {
+      coin.geometry.dispose();
+      coin.material.dispose();
+    });
+    
+    if (this.particleSystem) {
+      this.particleSystem.geometry.dispose();
+      this.particleSystem.material.dispose();
+    }
+  }
+}
+
+// Main application integration
+document.addEventListener('DOMContentLoaded', () => {
+  // Initialize sound system
+  const soundManager = new SoundManager();
+  soundManager.loadSounds().then(() => {
+    console.log('All sounds loaded successfully');
+    
+    // Play welcome sound
+    soundManager.play('button');
+    
+    // Add mute button functionality
+    const muteButton = document.getElementById('mute-button');
+    if (muteButton) {
+      muteButton.addEventListener('click', () => {
+        const isMuted = soundManager.toggleMute();
+        muteButton.innerHTML = isMuted ? 
+          '<i class
