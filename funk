@@ -1,3 +1,31 @@
+```json
+{
+  "requirements": ["requests>=2.31.0"],
+  "endpoints": {
+    "submit": "/combat/v1/submit",
+    "rewards": "/rewards"
+  }
+}def test_wyoming_bridge():
+    from core.wyoming_bridge import WyomingCombatAPI
+    api = WyomingCombatAPI()
+    assert api.submit_round("BULL", 100.0)["status"] in ["pending", "success"]try:
+    response = requests.post(..., timeout=10)  # Prevent hanging
+    response.raise_for_status()  # Crash on bad status
+except requests.exceptions.RequestException as e:
+    print(f"🚨 WYOMING CHAIN FAILURE: {str(e)}")
+    return {"error": "Combat logging failed"}echo ".env" >> .gitignore
+
+git add README.md && git commit -m "DOCS: Wyoming API specs"
+
+
+git add tests/test_combat.py && git commit -m "BATTLE TEST: First combat validation"
+
+
+git add core/wyoming_bridge.py && git commit -m "ARMOR: Error handling + timeout"
+
+git add .gitignore && git commit -m "LOCKDOWN: Add .env to gitignore"
+
+
 Terminal echo "CURRENT PRIORITY: WYO COMBAT OR NOTHING" >> ~/.reality_check  
 cat ~/.reality_check  # Burn this into your retina  
 
