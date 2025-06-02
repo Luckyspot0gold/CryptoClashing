@@ -2,7 +2,6 @@
 STYRD Games
 StoneYard Games
 ## Wyoming Blockchain Integration  
-```json
 
 for use hand shake contract must be aquired and present
 
@@ -32,3 +31,5 @@ def submit_round(self, move: str, damage: float):
     with open('.contract_hash') as f:
         assert validate_handshake(f.read()), "INVALID CONTRACT"
     # ... existing submission logic ...
+
+    Must posses or aquire StoneYard hand shake contract and posses to use this creation
