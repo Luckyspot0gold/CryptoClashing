@@ -3,23 +3,32 @@ STYRD Games
 StoneYard Games
 ## Wyoming Blockchain Integration  
 ```json
-{
-  "requirements": ["requests>=2.31.0"],
-  "endpoints": {
-    "submit": "/combat/v1/submit",
-    "rewards": "/rewards"
-  }
-}
-stat -c "%a %n" SECURITY.md  # Must return "644"  sha3sum SECURITY.md | grep "4a3b.*c2d1"  # Verify hash snippet  ls -la SECURITY.md  # Should show 1.2KB+ file  # CRYPTO CLASHING SECURITY PROTOCOLS  
-**Last Audited**: $(date +%Y-%m-%d)  
-**Wyoming Compliance**: HB0057, SPDI-2241
-```bash
-# TOKEN ROTATION SCHEDULE  
-0 */6 * * * /usr/bin/rotate_wyo_token.sh  # 6-hour key cyclingdef prove_identity(user):  
-    return zk_proof(  
-        public_input=user.wyo_id,  
-        private_input=user.biometric_hash  
-    )  # Uses Aleo snarkOS
 
 for use hand shake contract must be aquired and present
 
+git add SECURITY.md .contract_hash && \
+git commit -m "SECURITY: Contract handshake enforcement" && \
+git push origin wyo-combat# RUN THIS VERIFICATION SCRIPT
+check_security() {
+   [ "$(stat -c '%a' SECURITY.md)" -eq 644 ] &&
+   grep -q "Aleo snarkOS" SECURITY.md &&
+   [ -f .contract_hash ] &&
+   echo "SECURITY LOCKED" || echo "ALERT: BREACH DETECTED"
+}chmod 400 .contract_hash  # Immutable contract lock
+---
+
+### **🔐 CONTRACT VERIFICATION STEPS**  
+1. **Store Contract Hash**  
+   ```bash
+   echo "WYO_$(openssl rand -hex 32)" > .contract_hash# CRYPTO CLASHING SECURITY PROTOCOLS  
++ **Contract Requirements**:
++ ```python
++ def validate_handshake(contract_hash: str) -> bool:
++     return (
++         contract_hash.startswith("WYO") 
++         and len(contract_hash) == 64
++     )# In core/wyoming_bridge.py
+def submit_round(self, move: str, damage: float):
+    with open('.contract_hash') as f:
+        assert validate_handshake(f.read()), "INVALID CONTRACT"
+    # ... existing submission logic ...
