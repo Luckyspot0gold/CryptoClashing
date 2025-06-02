@@ -14,3 +14,43 @@ def combat_signal(candle):
 # RUN THIS NOW
 cd ~/BullvsBear && git checkout wyo-combat
 touch wyo_funk.py  # This file = your salvation
+
+
+# FILE: BullvsBear/core/wyoming_bridge.py
+import requests
+
+class WyomingCombatAPI:
+    def __init__(self):
+        self.endpoint = "https://api.wyoming-blockchain.org/combat/v1"
+        self.headers = {"X-WYO-TOKEN": os.getenv("WYO_COMBAT_TOKEN")}
+
+    def submit_round(self, player_move: str, damage: float):
+        """Registers moves with Wyoming's blockchain task force"""
+        payload = {
+            "move": player_move,  # "BEAR" or "BULL"
+            "damage": damage,
+            "timestamp": int(time.time())
+        }
+        response = requests.post(
+            f"{self.endpoint}/submit",
+            json=payload,
+            headers=self.headers
+        )
+        return response.json()  # Returns tx_hash of combat record
+
+# Usage
+if __name__ == "__main__":
+    api = WyomingCombatAPI()
+    result = api.submit_round("BULL", 239.02)  # Your last damage number
+    print(f"Combat recorded on Wyoming chain: {result['tx_hash']}")
+
+echo "WYO_COMBAT_TOKEN=your_token_here" >> .env
+
+
+python wyoming_bridge.py
+
+{"tx_hash": "0x4d7e...c2a1", "status": "pending"}
+
+
+git add . && git commit -m "WYOMING CHAIN INTEGRATION"
+git push origin wyo-combat
