@@ -1,0 +1,27 @@
+import os
+import time
+import requests
+
+class WyomingCombatAPI:
+    def __init__(self):
+        self.endpoint = "https://api.wyoming-blockchain.org/combat/v1"
+        self.headers = {"X-WYO-TOKEN": os.getenv("WYO_COMBAT_TOKEN")}
+
+    def submit_round(self, player_move: str, damage: float):
+        """Registers moves with Wyoming's blockchain task force"""
+        payload = {
+            "move": player_move,  # "BEAR" or "BULL"
+            "damage": damage,
+            "timestamp": int(time.time())
+        }
+        response = requests.post(
+            f"{self.endpoint}/submit",
+            json=payload,
+            headers=self.headers
+        )
+        return response.json()  # Returns tx_hash of combat record
+
+if __name__ == "__main__":
+    api = WyomingCombatAPI()
+    result = api.submit_round("BULL", 239.02)  # Example usage
+    print(f"Combat recorded on Wyoming chain: {result['tx_hash']}")
