@@ -1,0 +1,8 @@
+```mermaid
+flowchart TB
+    A[First Sip] --> B[Git Commit]
+    B --> C{Mermaid Working?}
+    C -->|Yes| D[Celebrate]
+    C -->|No| E[Another Sip]
+    E --> B
+```
