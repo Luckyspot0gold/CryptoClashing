@@ -1,0 +1,6 @@
+```bash
+# Add Mermaid to Streamlit
+sed -i '/import streamlit as st/a import streamlit.components.v1 as components' app.py
+sed -i '/st.title/a components.html("""<div class="mermaid">graph TD\nA[Market]-->B[Combat]\n</div><script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true});</script>""", height=300)'
+```
+
