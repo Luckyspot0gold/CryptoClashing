@@ -1,0 +1,8 @@
+```mermaid  
+flowchart TD  
+    A[CryptoClashing] --> B{Choose Hackathon}  
+    B --> C[Solana Grizzlython]  
+    B --> D[Chainlink Spring]  
+    C --> E[Add SOL Pay]  
+    D --> F[Add CCIP]  
+```  
