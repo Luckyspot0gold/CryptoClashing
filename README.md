@@ -2,8 +2,15 @@
 STYRD Games
 StoneYard Games
 ## Wyoming Blockchain Integration  
+Add this to your `README.md` to explain the ghost editor:  
+````markdown
+## 👻 AI Ghost Editor  
 
-for use hand shake contract must be aquired and present
+This repo uses an AI assistant to automatically:  
+- 🛠️ Fix syntax errors  
+- 🧹 Improve code style  
+- 🔍 Catch potential bugs  
+- ✅ Validate changes  
 
 git add SECURITY.md .contract_hash && \
 git commit -m "SECURITY: Contract handshake enforcement" && \
@@ -31,5 +38,7 @@ def submit_round(self, move: str, damage: float):
     with open('.contract_hash') as f:
         assert validate_handshake(f.read()), "INVALID CONTRACT"
     # ... existing submission logic ...
+1. `ai-review.yml` - AI reviews all PRs to `main`  
+2. `validate.yml` - Runs tests on all changes  
 
-    Must posses or aquire StoneYard hand shake contract and posses to use this creation
+    Must possess or acquire a StoneYard handshake contract and possess the right to use this creation.
