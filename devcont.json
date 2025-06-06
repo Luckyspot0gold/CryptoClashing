@@ -1,0 +1,13 @@
+```python  
+# .devcontainer/devcontainer.json  
+{  
+  "features": {  
+    "ghcr.io/devcontainers/features/python:1": {},  
+    "quantum": {  
+      "version": "latest",  
+      "gpu": true  
+    },  
+    "stone-token": {}  
+  }  
+}  
+```  
