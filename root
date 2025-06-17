@@ -4,3 +4,8 @@ sed -i '/import streamlit as st/a import streamlit.components.v1 as components' 
 sed -i '/st.title/a components.html("""<div class="mermaid">graph TD\nA[Market]-->B[Combat]\n</div><script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true});</script>""", height=300)'
 ```
 
+# Run these commands in your project root:
+git rm --cached -r .  # Reset tracking
+git reset HEAD --hard  # Wipe local changes
+git pull origin main   # Sync with GitHub
+rm -rf .git/index.lock # Remove lockfiles
