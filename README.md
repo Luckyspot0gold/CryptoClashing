@@ -1,4 +1,4 @@
-# CryptoClashing
+# Crypto Clashers Boxing 0.0.1
 STYRD Games
 StoneYard Games
 ## Wyoming Blockchain Integration  
