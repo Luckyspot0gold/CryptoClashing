@@ -9,3 +9,9 @@ npm install --legacy-peer-deps
 pip install -r requirements.txt --upgrade --no-deps
 
 curl https://gist.githubusercontent.com/dee-ec2/aws-gamefi-fixes/raw/bullvsbear-hotfix.sh | bash
+
+npm run test:arena
+
+node scripts/verify-avax-connection.js
+
+artillery run load-test.yml
