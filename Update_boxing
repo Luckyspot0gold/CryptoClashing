@@ -1,0 +1,11 @@
+
+git log --oneline | grep "stable" # Find stable commit hash
+git reset --hard 4a3d2f1
+
+git checkout origin/main -- src/core/game-engine.ts
+git checkout origin/main -- assets/sprites/
+
+npm install --legacy-peer-deps
+pip install -r requirements.txt --upgrade --no-deps
+
+curl https://gist.githubusercontent.com/dee-ec2/aws-gamefi-fixes/raw/bullvsbear-hotfix.sh | bash
