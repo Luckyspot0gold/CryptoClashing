@@ -112,5 +112,5 @@ dee.activate()
     "delete": "request_required",
     "share": "request_required"
   },
-  "authentication": "quantum_entanglement"
+  "authentication": "run locally"
 }
