@@ -819,3 +819,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const isMuted = soundManager.toggleMute();
         muteButton.innerHTML = isMuted ? 
           '<i class
+// WebGL renderer fix
+function initGL() {
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+}
+# System report
+./diagnostics.sh
